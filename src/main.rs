@@ -5,7 +5,7 @@ use std::process;
 
 use crate::{
     activation::{ReLU, Sigmoid},
-    cli::{Cli, parse_layers},
+    cli::{Cli, Commands, parse_layers},
     data::{load_data, load_targets},
     layer::Layer,
     loss::MSE,
@@ -23,14 +23,19 @@ mod network;
 mod loss;
 mod cli;
 mod data;
+mod model;
 
 fn main() {
-    // Parse command-line arguments
     let args = Cli::parse();
 
-    if !args.quiet {
-        println!("Neural Network Training\n");
+    match args.command {
+        Commands::Train(train_args) => handle_train(train_args),
+        Commands::Test(test_args) => handle_test(test_args),
     }
+}
+
+fn handle_train(args: cli::TrainArgs) {
+    println!("Neural Network Training\n");
 
     // Load data
     let dataset = match load_data(&args.data, args.target_columns) {
@@ -119,22 +124,18 @@ fn main() {
     let mut predictions = Vec::new();
 
     // Training loop
-    if !args.quiet {
-        eprint!("Training...0%");
-    }
+    eprint!("Training...0%");
 
     for epoch in 0..args.epochs {
         // Execute training step
         let (loss, prediction) = network.train_batch(&inputs, &targets, args.learning_rate, &loss_fn);
 
         // Progress indicator
-        if !args.quiet {
-            if epoch % (args.epochs / 33.max(1)) == 0 && epoch != 0 {
-                eprint!(".");
-            }
-            if epoch % (args.epochs / 10.max(1)) == 0 && epoch != 0 {
-                eprint!("{}%", (epoch * 100) / args.epochs);
-            }
+        if epoch % (args.epochs / 33.max(1)) == 0 && epoch != 0 {
+            eprint!(".");
+        }
+        if epoch % (args.epochs / 10.max(1)) == 0 && epoch != 0 {
+            eprint!("{}%", (epoch * 100) / args.epochs);
         }
 
         // Sample loss and predictions for plotting
@@ -144,9 +145,7 @@ fn main() {
         }
     }
 
-    if !args.quiet {
-        eprintln!("100%!");
-    }
+    eprintln!("100%!");
 
     // After training, test predictions
     println!("\nFinal Predictions:");
@@ -202,8 +201,64 @@ fn main() {
         println!("Training complete!");
     }
 }
+
+fn handle_test(args: cli::TestArgs) {
     if args.verbose {
-        println!("\nTraining complete!");
+        println!("Neural Network Testing\n");
+    }
+
+    // Load the trained model
+    if args.verbose {
+        println!("Loading model from '{}'...", args.model);
+    }
+
+    let mut network = match load_model(&args.model) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("Error loading model from '{}': {}", args.model, e);
+            process::exit(1);
+        }
+    };
+
+    if args.verbose {
+        println!("Model loaded successfully!");
+    }
+
+    // Load test data (no targets required)
+    let dataset = match load_data(&args.data, None) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Error loading test data from '{}': {}", args.data, e);
+            process::exit(1);
+        }
+    };
+
+    let inputs = dataset.inputs;
+
+    if args.verbose {
+        println!("Loaded {} test samples with {} features\n", inputs.rows, inputs.cols);
+    }
+
+    // Run predictions
+    let predictions = network.predict(&inputs);
+
+    // Output predictions only
+    println!("Predictions:");
+    for i in 0..inputs.rows {
+        let input = &inputs.data[i];
+        let prediction_vec = &predictions.data[i];
+
+        if args.verbose {
+            println!("Input: {:?}", input);
+            println!("  Prediction: {:?}", prediction_vec);
+        } else {
+            // Compact format
+            if prediction_vec.len() == 1 {
+                println!("{:.4}", prediction_vec[0]);
+            } else {
+                println!("{:?}", prediction_vec);
+            }
+        }
     }
 }
 

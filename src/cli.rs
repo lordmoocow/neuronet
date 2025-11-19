@@ -1,14 +1,29 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
-/// Neural Network CLI Tool - Train neural networks with configurable parameters
+/// Neural Network CLI Tool - Train and test neural networks from scratch
 #[derive(Parser, Debug)]
 #[command(name = "neuronet")]
 #[command(about = "A simple neural network implementation with configurable architecture", long_about = None)]
 pub struct Cli {
-    /// Path to input data file (CSV or JSON format)
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Train a new neural network model
+    Train(TrainArgs),
+    /// Test a trained model on new data
+    Test(TestArgs),
+}
+
+/// Training arguments
+#[derive(Parser, Debug)]
+pub struct TrainArgs {
+    /// Path to training data file (CSV or JSON format)
     ///
     /// CSV format: Each row is a sample, columns are features (and optionally targets at the end)
-    /// JSON format: {"inputs": [[...], ...], "targets": [[...], ...]} or just [[...], ...]
+    /// JSON format: {"inputs": [[...], ...], "targets": [[...], ...]}
     #[arg(short, long, value_name = "FILE")]
     pub data: String,
 
@@ -46,7 +61,7 @@ pub struct Cli {
     pub epochs: usize,
 
     /// Sample rate for tracking loss and predictions (record every Nth epoch)
-    #[arg(short, long, default_value = "10", value_name = "N")]
+    #[arg(long, default_value = "10", value_name = "N")]
     pub sample_rate: usize,
 
     /// Disable terminal plots
@@ -56,10 +71,25 @@ pub struct Cli {
     /// Enable verbose output
     #[arg(short, long)]
     pub verbose: bool,
+}
 
-    /// Suppress all non-essential output
-    #[arg(short, long, conflicts_with = "verbose")]
-    pub quiet: bool,
+/// Testing arguments
+#[derive(Parser, Debug)]
+pub struct TestArgs {
+    /// Path to the trained model file (JSON format)
+    #[arg(short, long, value_name = "FILE")]
+    pub model: String,
+
+    /// Path to test data file (CSV or JSON format)
+    ///
+    /// CSV format: Each row is a sample, columns are features
+    /// JSON format: [[...], ...] or {"inputs": [[...], ...]}
+    #[arg(short, long, value_name = "FILE")]
+    pub data: String,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 /// Represents a single layer specification

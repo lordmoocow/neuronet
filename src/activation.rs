@@ -3,6 +3,7 @@ use crate::matrix::Matrix;
 pub trait Activation {
     fn activate(&self, x: &Matrix) -> Matrix;
     fn derivative(&self, x: &Matrix) -> Matrix;
+    fn name(&self) -> &str;
 }
 
 pub struct ReLU;
@@ -15,6 +16,10 @@ impl Activation for ReLU {
     fn derivative(&self, v: &Matrix) -> Matrix {
         v.map(|x| if x > 0.0 { 1.0 } else { 0.0 })
     }
+
+    fn name(&self) -> &str {
+        "relu"
+    }
 }
 
 pub struct Sigmoid;
@@ -26,6 +31,10 @@ impl Activation for Sigmoid {
 
     fn derivative(&self, v: &Matrix) -> Matrix {
         v.map(|x| x * (1.0 - x))
+    }
+
+    fn name(&self) -> &str {
+        "sigmoid"
     }
 }
 

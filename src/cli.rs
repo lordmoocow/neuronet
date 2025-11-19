@@ -33,6 +33,10 @@ pub struct Cli {
     #[arg(short, long, value_name = "SPEC")]
     pub layers: String,
 
+    /// Path to save the trained model (JSON format)
+    #[arg(short, long, value_name = "FILE")]
+    pub save: String,
+
     /// Learning rate for gradient descent
     #[arg(short = 'r', long, default_value = "0.6", value_name = "RATE")]
     pub learning_rate: f64,

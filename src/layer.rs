@@ -110,6 +110,31 @@ impl Layer {
         }
         result
     }
+
+    /// Get the weights matrix (for serialization)
+    pub fn get_weights(&self) -> &Matrix {
+        &self.weights
+    }
+
+    /// Get the biases matrix (for serialization)
+    pub fn get_biases(&self) -> &Matrix {
+        &self.biases
+    }
+
+    /// Get the activation function name (for serialization)
+    pub fn get_activation_name(&self) -> &str {
+        self.activation.name()
+    }
+
+    /// Set the weights matrix (for deserialization)
+    pub fn set_weights(&mut self, weights: Matrix) {
+        self.weights = weights;
+    }
+
+    /// Set the biases matrix (for deserialization)
+    pub fn set_biases(&mut self, biases: Matrix) {
+        self.biases = biases;
+    }
 }
 
 #[cfg(test)]

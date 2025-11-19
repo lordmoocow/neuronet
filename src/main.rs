@@ -10,6 +10,7 @@ use crate::{
     layer::Layer,
     loss::MSE,
     matrix::Matrix,
+    model::{save_model, load_model},
     network::Network,
 };
 
@@ -189,6 +190,18 @@ fn main() {
         }
     }
 
+    // Save the trained model
+    println!("\nSaving model to '{}'...", args.save);
+    if let Err(e) = save_model(&network, &args.save, inputs.cols, targets.cols) {
+        eprintln!("Error saving model: {}", e);
+        process::exit(1);
+    }
+
+    println!("Model saved successfully!");
+    if args.verbose {
+        println!("Training complete!");
+    }
+}
     if args.verbose {
         println!("\nTraining complete!");
     }

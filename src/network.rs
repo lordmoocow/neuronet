@@ -13,6 +13,11 @@ impl Network {
         self.layers.push(layer);
     }
 
+    /// Get reference to layers (for serialization)
+    pub fn get_layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
     fn forward(&mut self, input: &Matrix) -> Matrix {
         // Forward pass through each layer in sequence
         // starting with the input matrix

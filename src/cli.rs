@@ -15,6 +15,8 @@ pub enum Commands {
     Train(TrainArgs),
     /// Test a trained model on new data
     Test(TestArgs),
+    /// Visualise a trained model on new data (2D)
+    Visualise(VisualiseArgs),
 }
 
 /// Training arguments
@@ -86,6 +88,20 @@ pub struct TestArgs {
     /// JSON format: [[...], ...] or {"inputs": [[...], ...]}
     #[arg(short, long, value_name = "FILE")]
     pub data: String,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+#[derive(Parser, Debug)]
+pub struct VisualiseArgs {
+    /// Path to the trained model file (JSON format)
+    #[arg(short, long, value_name="FILE")]
+    pub model: String,
+
+    #[arg(short, long)]
+    pub resolution: usize,
 
     /// Enable verbose output
     #[arg(short, long)]

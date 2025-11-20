@@ -31,6 +31,7 @@ fn main() {
     match args.command {
         Commands::Train(train_args) => handle_train(train_args),
         Commands::Test(test_args) => handle_test(test_args),
+        Commands::Visualise(vis_args) => handle_visualisation(vis_args),
     }
 }
 
@@ -259,6 +260,113 @@ fn handle_test(args: cli::TestArgs) {
                 println!("{:?}", prediction_vec);
             }
         }
+    }
+}
+
+fn handle_visualisation(args: cli::VisualiseArgs) {
+    if args.verbose {
+        println!("Neural Network 2D Visualisation\n");
+    }
+
+    // Load the trained model
+    if args.verbose {
+        println!("Loading model from '{}'...", args.model);
+    }
+
+    let mut network = match load_model(&args.model) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("Error loading model from '{}': {}", args.model, e);
+            process::exit(1);
+        }
+    };
+
+    if args.verbose {
+        println!("Model loaded successfully!");
+    }
+
+    // Generate 2D data to visualise
+    let inputs = generate_2d_grid(args.resolution);
+
+    if args.verbose {
+        println!("Generated {} test samples with {} features\n", inputs.rows, inputs.cols);
+    }
+
+    // Run predictions
+    let predictions = network.predict(&inputs);
+
+    // Display the decision boundary
+    display_decision_boundary(&predictions, args.resolution, args.verbose);
+}
+
+fn generate_2d_grid(resolution: usize) -> Matrix {
+    let step = 1.0 / (resolution - 1) as f64;
+    let mut grid = Matrix::zeros(resolution * resolution, 2);
+    for i in 0..resolution {
+        let x = step * i as f64;
+        for j in 0..resolution {
+            grid.data[i * resolution + j][0] = x;
+            grid.data[i * resolution + j][1] = step * j as f64;
+        }
+    }
+    grid
+}
+
+fn display_decision_boundary(predictions: &Matrix, resolution: usize, verbose: bool) {
+    println!("\nDecision Boundary Visualization");
+    println!("(Input space from 0.0 to 1.0 in both dimensions)\n");
+
+    if verbose {
+        println!("Resolution: {}x{} = {} points", resolution, resolution, predictions.rows);
+        println!();
+    }
+
+    // Display the grid (reversed so y increases upward like a normal graph)
+    for i in (0..resolution).rev() {
+        for j in 0..resolution {
+            let index = i * resolution + j;
+            let value = predictions.data[index][0];
+
+            // Map prediction value to ASCII characters
+            let symbol = match value {
+                v if v < 0.1 => " ",
+                v if v < 0.3 => "·",
+                v if v < 0.5 => "░",
+                v if v < 0.7 => "▒",
+                v if v < 0.9 => "▓",
+                _ => "█",
+            };
+            print!("{}", symbol);
+        }
+        println!();
+    }
+
+    println!("\nLegend:");
+    println!("  ' ' = 0.0-0.1 (strongly 0)");
+    println!("  '·' = 0.1-0.3");
+    println!("  '░' = 0.3-0.5 (uncertain)");
+    println!("  '▒' = 0.5-0.7");
+    println!("  '▓' = 0.7-0.9");
+    println!("  '█' = 0.9-1.0 (strongly 1)");
+
+    println!("\nCorner reference:");
+    println!("  Bottom-left  [0.0, 0.0]");
+    println!("  Bottom-right [1.0, 0.0]");
+    println!("  Top-left     [0.0, 1.0]");
+    println!("  Top-right    [1.0, 1.0]");
+
+    if verbose {
+        // Show some sample predictions at the corners
+        println!("\nCorner predictions:");
+        let bottom_left = predictions.data[0][0];
+        let bottom_right = predictions.data[resolution - 1][0];
+        let top_left = predictions.data[(resolution - 1) * resolution][0];
+        let top_right = predictions.data[resolution * resolution - 1][0];
+
+        println!("  [0.0, 0.0]: {:.4}", bottom_left);
+        println!("  [1.0, 0.0]: {:.4}", bottom_right);
+        println!("  [0.0, 1.0]: {:.4}", top_left);
+        println!("  [1.0, 1.0]: {:.4}", top_right);
     }
 }
 

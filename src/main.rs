@@ -137,10 +137,11 @@ fn handle_train(args: cli::TrainArgs) {
         }
         if epoch % (args.epochs / 10.max(1)) == 0 && epoch != 0 {
             eprint!("{}%", (epoch * 100) / args.epochs);
+
         }
 
         // Sample loss and predictions for plotting
-        if epoch % args.sample_rate == 0 {
+        if epoch % args.sample_rate == 0 || epoch == args.epochs-1 {
             losses.push(loss);
             predictions.push(prediction);
         }

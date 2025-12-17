@@ -36,11 +36,10 @@ impl Matrix {
         Self { rows, cols, data }
     }
 
-    pub fn random(rows: usize, cols: usize) -> Self {
+    pub fn random<R: Rng>(rows: usize, cols: usize, rng: &mut R) -> Self {
         // He initialisation scales the values based on the number of inputs
         let scale = (2.0 / rows as f64).sqrt();
 
-        let mut rng = rand::rng();
         let mut data = vec![vec![0.0; cols]; rows];
         for i in 0..rows {
             for j in 0..cols {

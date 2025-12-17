@@ -67,26 +67,29 @@ impl Network {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     #[test]
     fn new_add_layer() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut network = Network::new();
         assert_eq!(network.layers.len(), 0);
 
-        let layer1 = Layer::new(2, 3, Box::new(crate::activation::Sigmoid));
+        let layer1 = Layer::new(2, 3, Box::new(crate::activation::Sigmoid), &mut rng);
         network.add_layer(layer1);
         assert_eq!(network.layers.len(), 1);
 
-        let layer2 = Layer::new(3, 1, Box::new(crate::activation::Sigmoid));
+        let layer2 = Layer::new(3, 1, Box::new(crate::activation::Sigmoid), &mut rng);
         network.add_layer(layer2);
         assert_eq!(network.layers.len(), 2);
     }
 
     #[test]
     fn forward_predict_shapes() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut network = Network::new();
-        network.add_layer(Layer::new(2, 10, Box::new(crate::activation::Sigmoid)));
-        network.add_layer(Layer::new(10, 1, Box::new(crate::activation::Sigmoid)));
+        network.add_layer(Layer::new(2, 10, Box::new(crate::activation::Sigmoid), &mut rng));
+        network.add_layer(Layer::new(10, 1, Box::new(crate::activation::Sigmoid), &mut rng));
 
         let input = Matrix::from_vec(vec![
             vec![0.0, 0.0],
@@ -104,9 +107,10 @@ mod tests {
 
     #[test]
     fn train_batch_reduces_loss() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut network = Network::new();
-        network.add_layer(Layer::new(2, 3, Box::new(crate::activation::Sigmoid)));
-        network.add_layer(Layer::new(3, 1, Box::new(crate::activation::Sigmoid)));
+        network.add_layer(Layer::new(2, 3, Box::new(crate::activation::Sigmoid), &mut rng));
+        network.add_layer(Layer::new(3, 1, Box::new(crate::activation::Sigmoid), &mut rng));
 
         let inputs = Matrix::from_vec(vec![
             vec![0.0, 0.0],

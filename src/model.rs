@@ -24,11 +24,13 @@ pub struct ModelMetadata {
     pub input_size: usize,
     pub output_size: usize,
     pub num_layers: usize,
+    #[serde(default)]
+    pub seed: Option<u64>,
 }
 
 impl SerializableModel {
     /// Create a serializable model from a trained network
-    pub fn from_network(network: &Network, input_size: usize, output_size: usize) -> Self {
+    pub fn from_network(network: &Network, input_size: usize, output_size: usize, seed: u64) -> Self {
         let mut serializable_layers = Vec::new();
 
         for layer in network.get_layers() {
@@ -46,6 +48,7 @@ impl SerializableModel {
                 input_size,
                 output_size,
                 num_layers: network.get_layers().len(),
+                seed: Some(seed),
             },
         }
     }
@@ -61,14 +64,12 @@ impl SerializableModel {
                 _ => return Err(format!("Unknown activation function: {}", layer_data.activation).into()),
             };
 
-            // Create a layer with the saved weights and biases
-            let mut layer = Layer::new(
-                layer_data.weights.rows,
-                layer_data.weights.cols,
+            // Create a layer from the saved weights and biases
+            let layer = Layer::from_weights(
+                layer_data.weights.clone(),
+                layer_data.biases.clone(),
                 activation,
             );
-            layer.set_weights(layer_data.weights.clone());
-            layer.set_biases(layer_data.biases.clone());
 
             network.add_layer(layer);
         }
@@ -83,8 +84,9 @@ pub fn save_model(
     path: &str,
     input_size: usize,
     output_size: usize,
+    seed: u64,
 ) -> Result<(), Box<dyn Error>> {
-    let model = SerializableModel::from_network(network, input_size, output_size);
+    let model = SerializableModel::from_network(network, input_size, output_size, seed);
     let json = serde_json::to_string_pretty(&model)?;
     let mut file = File::create(path)?;
     file.write_all(json.as_bytes())?;

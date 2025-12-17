@@ -2,6 +2,7 @@ use clap::Parser;
 use textplots::{Chart, ColorPlot, Plot};
 use rgb::RGB8;
 use std::process;
+use rand::SeedableRng;
 
 use crate::{
     activation::{ReLU, Sigmoid},
@@ -36,7 +37,12 @@ fn main() {
 }
 
 fn handle_train(args: cli::TrainArgs) {
-    println!("Neural Network Training\n");
+    // Generate or use provided seed for reproducible weight initialization
+    let seed = args.seed.unwrap_or_else(rand::random::<u64>);
+    println!("Neural Network Training (seed: {})\n", seed);
+
+    // Create seeded RNG for weight initialization
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 
     // Load data
     let dataset = match load_data(&args.data, args.target_columns) {
@@ -98,7 +104,7 @@ fn handle_train(args: cli::TrainArgs) {
             "relu" => Box::new(ReLU),
             _ => unreachable!("Activation already validated"),
         };
-        network.add_layer(Layer::new(input_size, spec.size, activation));
+        network.add_layer(Layer::new(input_size, spec.size, activation, &mut rng));
         input_size = spec.size;
     }
 
@@ -193,7 +199,7 @@ fn handle_train(args: cli::TrainArgs) {
 
     // Save the trained model
     println!("\nSaving model to '{}'...", args.save);
-    if let Err(e) = save_model(&network, &args.save, inputs.cols, targets.cols) {
+    if let Err(e) = save_model(&network, &args.save, inputs.cols, targets.cols, seed) {
         eprintln!("Error saving model: {}", e);
         process::exit(1);
     }

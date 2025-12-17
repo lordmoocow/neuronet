@@ -1,5 +1,6 @@
 use crate::matrix::Matrix;
 use crate::activation::Activation;
+use rand::Rng;
 
 pub struct Layer {
     pub weights: Matrix,
@@ -12,19 +13,31 @@ pub struct Layer {
 }
 
 impl Layer {
-    /// Create a new layer
+    /// Create a new layer with random weight initialization
     /// input_size: number of inputs to this layer
     /// output_size: number of neurons in this layer
-    pub fn new(input_size: usize, output_size: usize, activation: Box<dyn Activation>) -> Self {
+    /// rng: random number generator for weight initialization
+    pub fn new<R: Rng>(input_size: usize, output_size: usize, activation: Box<dyn Activation>, rng: &mut R) -> Self {
         Self {
             // weights matrix represents a row per input/feature and a column per neuron
-            weights: Matrix::random(input_size, output_size),
+            weights: Matrix::random(input_size, output_size, rng),
             // biases is a single row which contains a value for each neuron
             biases: Matrix::zeros(1, output_size),
             // the activation function for this layer
             activation,
 
             // cache data for backpropagation
+            last_input: None,
+            last_activation: None,
+        }
+    }
+
+    /// Create a layer from pre-existing weights and biases (for loading saved models)
+    pub fn from_weights(weights: Matrix, biases: Matrix, activation: Box<dyn Activation>) -> Self {
+        Self {
+            weights,
+            biases,
+            activation,
             last_input: None,
             last_activation: None,
         }
@@ -126,25 +139,18 @@ impl Layer {
         self.activation.name()
     }
 
-    /// Set the weights matrix (for deserialization)
-    pub fn set_weights(&mut self, weights: Matrix) {
-        self.weights = weights;
-    }
-
-    /// Set the biases matrix (for deserialization)
-    pub fn set_biases(&mut self, biases: Matrix) {
-        self.biases = biases;
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use rand::SeedableRng;
 
     #[test]
     fn forward() {
         use crate::{layer::Layer, activation::Sigmoid, matrix::Matrix};
 
-        let mut layer = Layer::new(2, 2, Box::new(Sigmoid));
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut layer = Layer::new(2, 2, Box::new(Sigmoid), &mut rng);
 
         // Manually set weights and biases for predictable output
         layer.weights = Matrix::from_vec(vec![
@@ -184,7 +190,8 @@ mod tests {
     fn backward() {
         use crate::{layer::Layer, activation::Sigmoid, matrix::Matrix};
 
-        let mut layer = Layer::new(2, 2, Box::new(Sigmoid));
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut layer = Layer::new(2, 2, Box::new(Sigmoid), &mut rng);
         let starting_weights = Matrix::from_vec(vec![
             vec![0.5, -0.5],
             vec![0.3, 0.8],

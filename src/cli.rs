@@ -62,6 +62,10 @@ pub struct TrainArgs {
     #[arg(short, long, default_value = "5000", value_name = "N")]
     pub epochs: usize,
 
+    /// Random seed for weight initialization (auto-generated if not provided)
+    #[arg(long, value_name = "SEED")]
+    pub seed: Option<u64>,
+
     /// Sample rate for tracking loss and predictions (record every Nth epoch)
     #[arg(long, default_value = "10", value_name = "N")]
     pub sample_rate: usize,

@@ -376,32 +376,46 @@ fn display_decision_boundary(predictions: &Matrix, resolution: usize, verbose: b
     }
 
     // Display the grid (reversed so y increases upward like a normal graph)
+    // Color: Red (0.0) → Black (0.5 uncertain) → Blue (1.0)
+    // Density: confident = solid, uncertain = sparse
     for i in (0..resolution).rev() {
         for j in 0..resolution {
             let index = i * resolution + j;
             let value = predictions.data[index][0];
 
-            // Map prediction value to ASCII characters
-            let symbol = match value {
-                v if v < 0.1 => " ",
-                v if v < 0.3 => "·",
-                v if v < 0.5 => "░",
-                v if v < 0.7 => "▒",
-                v if v < 0.9 => "▓",
-                _ => "█",
+            // Confidence: 0.0 at boundary (0.5), 1.0 at extremes (0.0 or 1.0)
+            let confidence = (value - 0.5).abs() * 2.0;
+
+            // Red (0.0) → Black (0.5) → Blue (1.0) gradient
+            let (r, g, b) = if value < 0.5 {
+                // Black to Red: red increases with distance from 0.5
+                let t = (0.5 - value) * 2.0; // 0.0 to 1.0
+                ((255.0 * t) as u8, 0, 0)
+            } else {
+                // Black to Blue: blue increases with distance from 0.5
+                let t = (value - 0.5) * 2.0; // 0.0 to 1.0
+                (0, 0, (255.0 * t) as u8)
             };
-            print!("{}", symbol);
+
+            // Symbol based on confidence (doubled for better aspect ratio)
+            let symbol = match confidence {
+                c if c > 0.8 => "██",
+                c if c > 0.6 => "▓▓",
+                c if c > 0.4 => "▒▒",
+                c if c > 0.2 => "░░",
+                _ => "  ",
+            };
+
+            // ANSI: foreground color with symbol
+            print!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, symbol);
         }
         println!();
     }
 
     println!("\nLegend:");
-    println!("  ' ' = 0.0-0.1 (strongly 0)");
-    println!("  '·' = 0.1-0.3");
-    println!("  '░' = 0.3-0.5 (uncertain)");
-    println!("  '▒' = 0.5-0.7");
-    println!("  '▓' = 0.7-0.9");
-    println!("  '█' = 0.9-1.0 (strongly 1)");
+    println!("  \x1b[38;2;255;0;0m██\x1b[0m = 0.0 (strongly class 0)");
+    println!("  \x1b[38;2;80;0;0m░░\x1b[0m / \x1b[38;2;0;0;80m░░\x1b[0m = uncertain");
+    println!("  \x1b[38;2;0;0;255m██\x1b[0m = 1.0 (strongly class 1)");
 
     println!("\nCorner reference:");
     println!("  Bottom-left  [0.0, 0.0]");

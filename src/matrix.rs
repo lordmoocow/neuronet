@@ -92,6 +92,7 @@ impl Matrix {
         result
     }
 
+    #[allow(dead_code)]
     pub fn add(&self, other: &Matrix) -> Matrix {
         assert_eq!(self.rows, other.rows, 
           "Matrix dimensions incompatible for addition: ({}, {}) and ({}, {})",

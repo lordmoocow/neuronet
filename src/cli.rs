@@ -55,7 +55,7 @@ pub struct TrainArgs {
     pub save: Option<String>,
 
     /// Output directory for training artifacts (model, metrics, checkpoints)
-    #[arg(long, value_name = "DIR")]
+    #[arg(short, long, value_name = "DIR")]
     pub output_dir: Option<String>,
 
     /// What to track: comma-separated list of loss,predictions,boundary,checkpoint
@@ -69,6 +69,13 @@ pub struct TrainArgs {
     /// Number of training epochs
     #[arg(short, long, default_value = "5000", value_name = "N")]
     pub epochs: usize,
+
+    /// Number of training iterations (independent runs with different seeds)
+    ///
+    /// Each iteration uses seed + (iteration - 1) for weight initialization.
+    /// With iterations > 1, output paths include iteration numbers.
+    #[arg(short, long, default_value = "1", value_name = "N")]
+    pub iterations: usize,
 
     /// Random seed for weight initialization (auto-generated if not provided)
     #[arg(long, value_name = "SEED")]

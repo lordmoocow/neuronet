@@ -1,6 +1,12 @@
-use crate::{activation::{ReLU, Sigmoid}, layer::Layer, matrix::Matrix, network::Network};
-use serde::{Deserialize, Serialize};
 use std::{error::Error, fs::File, io::Write};
+
+use serde::{Deserialize, Serialize};
+
+use crate::activation::{ReLU, Sigmoid};
+use crate::export::ensure_parent_dir;
+use crate::layer::Layer;
+use crate::matrix::Matrix;
+use crate::network::Network;
 
 /// Serializable representation of a neural network layer
 #[derive(Serialize, Deserialize)]
@@ -86,6 +92,7 @@ pub fn save_model(
     output_size: usize,
     seed: u64,
 ) -> Result<(), Box<dyn Error>> {
+    ensure_parent_dir(path)?;
     let model = SerializableModel::from_network(network, input_size, output_size, seed);
     let json = serde_json::to_string_pretty(&model)?;
     let mut file = File::create(path)?;

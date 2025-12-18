@@ -10,7 +10,7 @@ use crate::cli::TrackConfig;
 use crate::matrix::Matrix;
 
 /// Create parent directories for a path if they don't exist
-fn ensure_parent_dir(path: &str) -> Result<(), Box<dyn Error>> {
+pub fn ensure_parent_dir(path: &str) -> Result<(), Box<dyn Error>> {
     if let Some(parent) = Path::new(path).parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;

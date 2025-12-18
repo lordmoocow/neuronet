@@ -1,6 +1,4 @@
 use clap::Parser;
-use textplots::{Chart, ColorPlot, Plot};
-use rgb::RGB8;
 use std::process;
 use rand::SeedableRng;
 
@@ -25,6 +23,7 @@ mod loss;
 mod cli;
 mod data;
 mod model;
+mod export;
 
 fn main() {
     let args = Cli::parse();
@@ -127,10 +126,31 @@ fn handle_train(args: cli::TrainArgs) {
 
     // Training hyperparameters
     let loss_fn = MSE;
-    let mut losses = Vec::new();
-    let mut predictions = Vec::new();
 
-    // Training loop
+    // Initialize streaming writers if requested
+    let mut loss_writer = match &args.output_loss {
+        Some(path) => match export::LossWriter::new(path) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("Error creating loss output file '{}': {}", path, e);
+                process::exit(1);
+            }
+        },
+        None => None,
+    };
+
+    let mut pred_writer = match &args.output_predictions {
+        Some(path) => match export::PredictionWriter::new(path, inputs.rows) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("Error creating predictions output file '{}': {}", path, e);
+                process::exit(1);
+            }
+        },
+        None => None,
+    };
+
+    // Training loop - streaming to files, no in-memory accumulation
     eprint!("Training...0%");
 
     for epoch in 0..args.epochs {
@@ -143,17 +163,44 @@ fn handle_train(args: cli::TrainArgs) {
         }
         if epoch % (args.epochs / 10.max(1)) == 0 && epoch != 0 {
             eprint!("{}%", (epoch * 100) / args.epochs);
-
         }
 
-        // Sample loss and predictions for plotting
-        if epoch % args.sample_rate == 0 || epoch == args.epochs-1 {
-            losses.push(loss);
-            predictions.push(prediction);
+        // Stream to files at sample rate
+        if epoch % args.sample_rate == 0 || epoch == args.epochs - 1 {
+            if let Some(ref mut writer) = loss_writer {
+                if let Err(e) = writer.write(epoch, loss) {
+                    eprintln!("Error writing loss data: {}", e);
+                    process::exit(1);
+                }
+            }
+            if let Some(ref mut writer) = pred_writer {
+                // Extract first output of each sample's prediction
+                let preds: Vec<f64> = prediction.data.iter().map(|row| row[0]).collect();
+                if let Err(e) = writer.write(epoch, &preds) {
+                    eprintln!("Error writing prediction data: {}", e);
+                    process::exit(1);
+                }
+            }
         }
     }
 
     eprintln!("100%!");
+
+    // Finish streaming writers
+    if let Some(writer) = loss_writer {
+        if let Err(e) = writer.finish() {
+            eprintln!("Error finalizing loss output: {}", e);
+            process::exit(1);
+        }
+        println!("Loss data written to '{}'", args.output_loss.as_ref().unwrap());
+    }
+    if let Some(writer) = pred_writer {
+        if let Err(e) = writer.finish() {
+            eprintln!("Error finalizing predictions output: {}", e);
+            process::exit(1);
+        }
+        println!("Prediction data written to '{}'", args.output_predictions.as_ref().unwrap());
+    }
 
     // After training, test predictions
     println!("\nFinal Predictions:");
@@ -182,18 +229,18 @@ fn handle_train(args: cli::TrainArgs) {
         }
     }
 
-    // Display plots if not disabled
-    if !args.no_plots {
-        if args.verbose {
-            println!("\nSample rate: every {} epochs", args.sample_rate);
-        }
-        plot_losses(&losses, args.sample_rate);
-
-        // Only show prediction evolution for small datasets
-        if inputs.rows <= 10 {
-            plot_predictions(&predictions, &inputs, &targets, args.sample_rate);
-        } else if args.verbose {
-            println!("\nSkipping prediction evolution plot (too many samples)");
+    // Generate decision boundary if requested (only for 2D input networks)
+    if let Some(output_path) = &args.output_boundary {
+        if inputs.cols == 2 {
+            let grid = generate_2d_grid(args.output_boundary_resolution);
+            let boundary_predictions = network.predict(&grid);
+            if let Err(e) = export::export_boundary(output_path, &grid, &boundary_predictions) {
+                eprintln!("Error exporting boundary: {}", e);
+                process::exit(1);
+            }
+            println!("Decision boundary exported to '{}'", output_path);
+        } else {
+            eprintln!("Warning: --output-boundary requires 2D input data, skipping");
         }
     }
 
@@ -377,112 +424,3 @@ fn display_decision_boundary(predictions: &Matrix, resolution: usize, verbose: b
     }
 }
 
-fn plot_predictions(predictions: &[Matrix], inputs: &Matrix, targets: &Matrix, sample_rate: usize) {
-    // Define colors for each input pattern (up to 10)
-    let colors = [
-        RGB8::new(255, 0, 0),     // Red
-        RGB8::new(0, 255, 0),     // Green
-        RGB8::new(0, 128, 255),   // Blue
-        RGB8::new(255, 255, 0),   // Yellow
-        RGB8::new(255, 0, 255),   // Magenta
-        RGB8::new(0, 255, 255),   // Cyan
-        RGB8::new(255, 128, 0),   // Orange
-        RGB8::new(128, 0, 255),   // Purple
-        RGB8::new(128, 255, 0),   // Lime
-        RGB8::new(255, 128, 128), // Pink
-    ];
-
-    println!("\nPrediction Evolution:");
-
-    // Print legend for first few samples
-    let num_samples = inputs.rows.min(10);
-    for i in 0..num_samples {
-        let input = &inputs.data[i];
-        let target = &targets.data[i];
-        let color_name = match i {
-            0 => "Red",
-            1 => "Green",
-            2 => "Blue",
-            3 => "Yellow",
-            4 => "Magenta",
-            5 => "Cyan",
-            6 => "Orange",
-            7 => "Purple",
-            8 => "Lime",
-            9 => "Pink",
-            _ => "?",
-        };
-
-        if target.len() == 1 {
-            println!("  {:<8} {:?} (target → {:.1})", format!("{}:", color_name), input, target[0]);
-        } else {
-            println!("  {:<8} {:?} (target → {:?})", format!("{}:", color_name), input, target);
-        }
-    }
-    println!();
-
-    // Create owned data for each series (one per input row)
-    let mut series_data: Vec<Vec<(f32, f32)>> = Vec::new();
-    for i in 0..num_samples {
-        let series = (0..predictions.len())
-            .map(|checkpoint| {
-                let prediction = predictions[checkpoint].data[i][0] as f32;
-                ((checkpoint * sample_rate) as f32, prediction)
-            })
-            .collect::<Vec<(f32, f32)>>();
-        series_data.push(series);
-    }
-
-    // Build chart with all series
-    // We need to manually expand this for now due to lifetime constraints
-    match num_samples {
-        1 => {
-            let shape0 = textplots::Shape::Lines(&series_data[0]);
-            Chart::new(300, 60, 0.0, ((predictions.len() - 1) * sample_rate) as f32)
-                .linecolorplot(&shape0, colors[0])
-                .display();
-        }
-        2 => {
-            let shape0 = textplots::Shape::Lines(&series_data[0]);
-            let shape1 = textplots::Shape::Lines(&series_data[1]);
-            Chart::new(300, 60, 0.0, ((predictions.len() - 1) * sample_rate) as f32)
-                .linecolorplot(&shape0, colors[0])
-                .linecolorplot(&shape1, colors[1])
-                .display();
-        }
-        3 => {
-            let shape0 = textplots::Shape::Lines(&series_data[0]);
-            let shape1 = textplots::Shape::Lines(&series_data[1]);
-            let shape2 = textplots::Shape::Lines(&series_data[2]);
-            Chart::new(300, 60, 0.0, ((predictions.len() - 1) * sample_rate) as f32)
-                .linecolorplot(&shape0, colors[0])
-                .linecolorplot(&shape1, colors[1])
-                .linecolorplot(&shape2, colors[2])
-                .display();
-        }
-        _ => {
-            // For4 or more samples, plot first 4 only
-            let shape0 = textplots::Shape::Lines(&series_data[0]);
-            let shape1 = textplots::Shape::Lines(&series_data[1]);
-            let shape2 = textplots::Shape::Lines(&series_data[2]);
-            let shape3 = textplots::Shape::Lines(&series_data[3]);
-            Chart::new(300, 60, 0.0, ((predictions.len() - 1) * sample_rate) as f32)
-                .linecolorplot(&shape0, colors[0])
-                .linecolorplot(&shape1, colors[1])
-                .linecolorplot(&shape2, colors[2])
-                .linecolorplot(&shape3, colors[3])
-                .display();
-        }
-    }
-}
-
-fn plot_losses(losses: &[f64], sample_rate: usize) {
-    println!("\nLoss evolution:");
-    Chart::new(300, 60, 0.0, ((losses.len() - 1) * sample_rate) as f32)
-        .lineplot(&textplots::Shape::Lines(
-            &(0..losses.len())
-                .map(|x| ((x * sample_rate) as f32, losses[x] as f32))
-                .collect::<Vec<(f32, f32)>>(),
-        ))
-        .display();
-}

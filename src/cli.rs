@@ -70,9 +70,21 @@ pub struct TrainArgs {
     #[arg(long, default_value = "10", value_name = "N")]
     pub sample_rate: usize,
 
-    /// Disable terminal plots
-    #[arg(long)]
-    pub no_plots: bool,
+    /// Stream loss values to CSV file during training
+    #[arg(long, value_name = "FILE")]
+    pub output_loss: Option<String>,
+
+    /// Stream prediction evolution to CSV file during training
+    #[arg(long, value_name = "FILE")]
+    pub output_predictions: Option<String>,
+
+    /// Export decision boundary grid after training (for 2D input networks only)
+    #[arg(long, value_name = "FILE")]
+    pub output_boundary: Option<String>,
+
+    /// Resolution for decision boundary grid (points per axis)
+    #[arg(long, value_name = "N", default_value = "100")]
+    pub output_boundary_resolution: usize,
 
     /// Enable verbose output
     #[arg(short, long)]

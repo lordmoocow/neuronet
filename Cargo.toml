@@ -5,8 +5,6 @@ edition = "2024"
 
 [dependencies]
 rand = "0.9.2"
-textplots = "0.8.7"
-rgb = "0.8.52"
 clap = { version = "4.5.53", features = ["derive"] }
 csv = "1.4.0"
 serde = { version = "1.0.228", features = ["derive"] }

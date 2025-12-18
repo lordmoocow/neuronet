@@ -8,7 +8,6 @@ use crate::{
     data::{load_data, load_targets},
     layer::Layer,
     loss::MSE,
-    matrix::Matrix,
     model::{save_model, load_model},
     network::Network,
 };
@@ -24,6 +23,7 @@ mod cli;
 mod data;
 mod model;
 mod export;
+mod visualisation;
 
 fn main() {
     let args = Cli::parse();
@@ -31,7 +31,7 @@ fn main() {
     match args.command {
         Commands::Train(train_args) => handle_train(train_args),
         Commands::Test(test_args) => handle_test(test_args),
-        Commands::Visualise(vis_args) => handle_visualisation(vis_args),
+        Commands::Visualise(vis_args) => visualisation::handle_visualisation(vis_args),
     }
 }
 
@@ -192,7 +192,7 @@ fn handle_train(args: cli::TrainArgs) {
     let boundary_grid = training_output
         .as_ref()
         .filter(|o| o.tracking_boundary())
-        .map(|o| generate_2d_grid(o.boundary_resolution()));
+        .map(|o| visualisation::generate_2d_grid(o.boundary_resolution()));
 
     // Training loop
     eprint!("Training...0%");
@@ -358,248 +358,3 @@ fn handle_test(args: cli::TestArgs) {
         }
     }
 }
-
-fn handle_visualisation(args: cli::VisualiseArgs) {
-    match (&args.model, &args.dir) {
-        (Some(model_path), None) => {
-            // Static mode (existing behaviour)
-            handle_static_visualisation(model_path, args.resolution, args.verbose);
-        }
-        (None, Some(dir_path)) => {
-            // Animated mode
-            handle_animated_visualisation(dir_path, &args);
-        }
-        _ => {
-            eprintln!("Error: Must specify either --model or --dir");
-            process::exit(1);
-        }
-    }
-}
-
-fn handle_static_visualisation(model_path: &str, resolution: usize, verbose: bool) {
-    if verbose {
-        println!("Neural Network 2D Visualisation\n");
-    }
-
-    // Load the trained model
-    if verbose {
-        println!("Loading model from '{}'...", model_path);
-    }
-
-    let mut network = match load_model(model_path) {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("Error loading model from '{}': {}", model_path, e);
-            process::exit(1);
-        }
-    };
-
-    if verbose {
-        println!("Model loaded successfully!");
-    }
-
-    // Generate 2D data to visualise
-    let inputs = generate_2d_grid(resolution);
-
-    if verbose {
-        println!(
-            "Generated {} test samples with {} features\n",
-            inputs.rows, inputs.cols
-        );
-    }
-
-    // Run predictions
-    let predictions = network.predict(&inputs);
-
-    // Display the decision boundary
-    display_decision_boundary(&predictions, resolution, verbose);
-}
-
-fn handle_animated_visualisation(dir: &str, args: &cli::VisualiseArgs) {
-    use std::io::{self, Write};
-    use std::thread;
-    use std::time::Duration;
-
-    // Load metadata
-    let metadata = match export::load_metadata(dir) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Error loading metadata from '{}': {}", dir, e);
-            process::exit(1);
-        }
-    };
-
-    if !metadata.tracking.boundary {
-        eprintln!(
-            "Error: No boundary data in '{}' (was not tracked during training)",
-            dir
-        );
-        process::exit(1);
-    }
-
-    // List boundary files
-    let files = match export::list_boundary_files(dir) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error listing boundary files: {}", e);
-            process::exit(1);
-        }
-    };
-
-    if files.is_empty() {
-        eprintln!("Error: No boundary files found in '{}/boundary'", dir);
-        process::exit(1);
-    }
-
-    // Filter by epoch range if specified
-    let files: Vec<_> = files
-        .into_iter()
-        .filter(|(epoch, _)| {
-            args.start_epoch.map_or(true, |s| *epoch >= s)
-                && args.end_epoch.map_or(true, |e| *epoch <= e)
-        })
-        .collect();
-
-    let resolution = metadata.tracking.boundary_resolution;
-    let total_epochs = metadata.hyperparameters.epochs;
-    let delay = Duration::from_millis(args.delay);
-
-    if args.verbose {
-        println!(
-            "Animating {} boundary snapshots at {}ms delay",
-            files.len(),
-            args.delay
-        );
-        println!("Resolution: {}x{}", resolution, resolution);
-        println!();
-    }
-
-    loop {
-        for (i, (epoch, path)) in files.iter().enumerate() {
-            // Load boundary data
-            let predictions = match export::load_boundary(path) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Error loading {}: {}", path, e);
-                    continue;
-                }
-            };
-
-            // Clear screen and move cursor to top-left
-            print!("\x1b[2J\x1b[H");
-
-            // Header with progress
-            println!(
-                "Epoch: {:>5} / {}  Frame: {:>4} / {}",
-                epoch,
-                total_epochs,
-                i + 1,
-                files.len()
-            );
-            println!(
-                "Seed: {}  LR: {}  Architecture: {}",
-                metadata.seed, metadata.hyperparameters.learning_rate, metadata.architecture.layers
-            );
-            println!();
-
-            // Render boundary
-            display_decision_boundary(&predictions, resolution, false);
-
-            // Flush and sleep
-            io::stdout().flush().unwrap();
-            thread::sleep(delay);
-        }
-
-        if !args.loop_animation {
-            break;
-        }
-    }
-
-    println!("\nAnimation complete.");
-}
-
-fn generate_2d_grid(resolution: usize) -> Matrix {
-    let step = 1.0 / (resolution - 1) as f64;
-    let mut grid = Matrix::zeros(resolution * resolution, 2);
-    for i in 0..resolution {
-        let x = step * i as f64;
-        for j in 0..resolution {
-            grid.data[i * resolution + j][0] = x;
-            grid.data[i * resolution + j][1] = step * j as f64;
-        }
-    }
-    grid
-}
-
-fn display_decision_boundary(predictions: &Matrix, resolution: usize, verbose: bool) {
-    println!("\nDecision Boundary Visualization");
-    println!("(Input space from 0.0 to 1.0 in both dimensions)\n");
-
-    if verbose {
-        println!("Resolution: {}x{} = {} points", resolution, resolution, predictions.rows);
-        println!();
-    }
-
-    // Display the grid (reversed so y increases upward like a normal graph)
-    // Color: Red (0.0) → Black (0.5 uncertain) → Blue (1.0)
-    // Density: confident = solid, uncertain = sparse
-    for i in (0..resolution).rev() {
-        for j in 0..resolution {
-            let index = i * resolution + j;
-            let value = predictions.data[index][0];
-
-            // Confidence: 0.0 at boundary (0.5), 1.0 at extremes (0.0 or 1.0)
-            let confidence = (value - 0.5).abs() * 2.0;
-
-            // Red (0.0) → Black (0.5) → Blue (1.0) gradient
-            let (r, g, b) = if value < 0.5 {
-                // Black to Red: red increases with distance from 0.5
-                let t = (0.5 - value) * 2.0; // 0.0 to 1.0
-                ((255.0 * t) as u8, 0, 0)
-            } else {
-                // Black to Blue: blue increases with distance from 0.5
-                let t = (value - 0.5) * 2.0; // 0.0 to 1.0
-                (0, 0, (255.0 * t) as u8)
-            };
-
-            // Symbol based on confidence (doubled for better aspect ratio)
-            let symbol = match confidence {
-                c if c > 0.8 => "██",
-                c if c > 0.6 => "▓▓",
-                c if c > 0.4 => "▒▒",
-                c if c > 0.2 => "░░",
-                _ => "  ",
-            };
-
-            // ANSI: foreground color with symbol
-            print!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, symbol);
-        }
-        println!();
-    }
-
-    println!("\nLegend:");
-    println!("  \x1b[38;2;255;0;0m██\x1b[0m = 0.0 (strongly class 0)");
-    println!("  \x1b[38;2;80;0;0m░░\x1b[0m / \x1b[38;2;0;0;80m░░\x1b[0m = uncertain");
-    println!("  \x1b[38;2;0;0;255m██\x1b[0m = 1.0 (strongly class 1)");
-
-    println!("\nCorner reference:");
-    println!("  Bottom-left  [0.0, 0.0]");
-    println!("  Bottom-right [1.0, 0.0]");
-    println!("  Top-left     [0.0, 1.0]");
-    println!("  Top-right    [1.0, 1.0]");
-
-    if verbose {
-        // Show some sample predictions at the corners
-        println!("\nCorner predictions:");
-        let bottom_left = predictions.data[0][0];
-        let bottom_right = predictions.data[resolution - 1][0];
-        let top_left = predictions.data[(resolution - 1) * resolution][0];
-        let top_right = predictions.data[resolution * resolution - 1][0];
-
-        println!("  [0.0, 0.0]: {:.4}", bottom_left);
-        println!("  [1.0, 0.0]: {:.4}", bottom_right);
-        println!("  [0.0, 1.0]: {:.4}", top_left);
-        println!("  [1.0, 1.0]: {:.4}", top_right);
-    }
-}
-

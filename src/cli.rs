@@ -50,9 +50,17 @@ pub struct TrainArgs {
     #[arg(short, long, value_name = "SPEC")]
     pub layers: String,
 
-    /// Path to save the trained model (JSON format)
+    /// Path to save the trained model (ignored if --output-dir is set)
     #[arg(short, long, value_name = "FILE")]
-    pub save: String,
+    pub save: Option<String>,
+
+    /// Output directory for training artifacts (model, metrics, checkpoints)
+    #[arg(long, value_name = "DIR")]
+    pub output_dir: Option<String>,
+
+    /// What to track: comma-separated list of loss,predictions,boundary,checkpoint
+    #[arg(long, value_name = "LIST", default_value = "loss,predictions")]
+    pub track: String,
 
     /// Learning rate for gradient descent
     #[arg(short = 'r', long, default_value = "0.6", value_name = "RATE")]
@@ -70,21 +78,13 @@ pub struct TrainArgs {
     #[arg(long, default_value = "10", value_name = "N")]
     pub sample_rate: usize,
 
-    /// Stream loss values to CSV file during training
-    #[arg(long, value_name = "FILE")]
-    pub output_loss: Option<String>,
-
-    /// Stream prediction evolution to CSV file during training
-    #[arg(long, value_name = "FILE")]
-    pub output_predictions: Option<String>,
-
-    /// Export decision boundary grid after training (for 2D input networks only)
-    #[arg(long, value_name = "FILE")]
-    pub output_boundary: Option<String>,
-
-    /// Resolution for decision boundary grid (points per axis)
+    /// Resolution for boundary grid (points per axis)
     #[arg(long, value_name = "N", default_value = "100")]
-    pub output_boundary_resolution: usize,
+    pub boundary_resolution: usize,
+
+    /// Save model checkpoint every N epochs (defaults to sample_rate * 100)
+    #[arg(long, value_name = "N")]
+    pub checkpoint_rate: Option<usize>,
 
     /// Enable verbose output
     #[arg(short, long)]
@@ -112,12 +112,33 @@ pub struct TestArgs {
 
 #[derive(Parser, Debug)]
 pub struct VisualiseArgs {
-    /// Path to the trained model file (JSON format)
-    #[arg(short, long, value_name="FILE")]
-    pub model: String,
+    /// Path to trained model file (for static visualisation)
+    #[arg(short, long, value_name = "FILE", conflicts_with = "dir")]
+    pub model: Option<String>,
 
-    #[arg(short, long)]
+    /// Path to training output directory (for animated visualisation)
+    #[arg(long, value_name = "DIR", conflicts_with = "model")]
+    pub dir: Option<String>,
+
+    /// Resolution for static visualisation (ignored with --dir)
+    #[arg(short, long, default_value = "40")]
     pub resolution: usize,
+
+    /// Delay between frames in milliseconds (animation mode)
+    #[arg(long, default_value = "100")]
+    pub delay: u64,
+
+    /// Loop animation continuously
+    #[arg(long)]
+    pub loop_animation: bool,
+
+    /// Start animation from specific epoch
+    #[arg(long)]
+    pub start_epoch: Option<usize>,
+
+    /// End animation at specific epoch
+    #[arg(long)]
+    pub end_epoch: Option<usize>,
 
     /// Enable verbose output
     #[arg(short, long)]
@@ -171,6 +192,36 @@ pub fn parse_layers(spec: &str) -> Result<Vec<LayerSpec>, String> {
     }
 
     Ok(layers)
+}
+
+/// Configuration for what to track during training
+#[derive(Debug, Default, Clone)]
+pub struct TrackConfig {
+    pub loss: bool,
+    pub predictions: bool,
+    pub boundary: bool,
+    pub checkpoint: bool,
+}
+
+/// Parse track specification into flags
+///
+/// Format: "loss,predictions,boundary,checkpoint" (comma-separated)
+pub fn parse_track(spec: &str) -> Result<TrackConfig, String> {
+    let mut config = TrackConfig::default();
+    for item in spec.split(',') {
+        match item.trim().to_lowercase().as_str() {
+            "loss" => config.loss = true,
+            "predictions" => config.predictions = true,
+            "boundary" => config.boundary = true,
+            "checkpoint" => config.checkpoint = true,
+            "" => {} // ignore empty
+            other => return Err(format!(
+                "Unknown track option: '{}'. Valid: loss,predictions,boundary,checkpoint",
+                other
+            )),
+        }
+    }
+    Ok(config)
 }
 
 #[cfg(test)]

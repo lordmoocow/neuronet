@@ -4,7 +4,7 @@ use rand::SeedableRng;
 
 use crate::{
     activation::{ReLU, Sigmoid},
-    cli::{Cli, Commands, parse_layers},
+    cli::{Cli, Commands, parse_layers, parse_track},
     data::{load_data, load_targets},
     layer::Layer,
     loss::MSE,
@@ -43,6 +43,25 @@ fn handle_train(args: cli::TrainArgs) {
     // Create seeded RNG for weight initialization
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 
+    // Validate output configuration
+    let save_path = match (&args.save, &args.output_dir) {
+        (None, None) => {
+            eprintln!("Error: Must specify --save or --output-dir");
+            process::exit(1);
+        }
+        (Some(path), None) => path.clone(),
+        (_, Some(dir)) => format!("{}/model.json", dir),
+    };
+
+    // Parse track configuration
+    let track_config = match parse_track(&args.track) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    };
+
     // Load data
     let dataset = match load_data(&args.data, args.target_columns) {
         Ok(d) => d,
@@ -79,9 +98,20 @@ fn handle_train(args: cli::TrainArgs) {
         process::exit(1);
     }
 
+    // Validate boundary tracking requires 2D input
+    if track_config.boundary && inputs.cols != 2 {
+        eprintln!(
+            "Error: --track boundary requires 2D input data (got {} features)",
+            inputs.cols
+        );
+        process::exit(1);
+    }
+
     if args.verbose {
-        println!("Loaded {} samples with {} features and {} targets",
-            inputs.rows, inputs.cols, targets.cols);
+        println!(
+            "Loaded {} samples with {} features and {} targets",
+            inputs.rows, inputs.cols, targets.cols
+        );
     }
 
     // Parse layer specification
@@ -117,7 +147,8 @@ fn handle_train(args: cli::TrainArgs) {
     }
 
     if args.verbose {
-        println!("Network architecture: {} -> {} layers -> {}",
+        println!(
+            "Network architecture: {} -> {} layers -> {}",
             inputs.cols,
             layer_specs.len(),
             targets.cols
@@ -127,57 +158,86 @@ fn handle_train(args: cli::TrainArgs) {
     // Training hyperparameters
     let loss_fn = MSE;
 
-    // Initialize streaming writers if requested
-    let mut loss_writer = match &args.output_loss {
-        Some(path) => match export::LossWriter::new(path) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("Error creating loss output file '{}': {}", path, e);
-                process::exit(1);
-            }
-        },
-        None => None,
+    // Initialize training output if directory mode
+    let checkpoint_rate = args.checkpoint_rate.unwrap_or(args.sample_rate * 100);
+    let mut training_output = if let Some(ref dir) = args.output_dir {
+        Some(
+            match export::TrainingOutput::new(
+                dir,
+                seed,
+                &args.data,
+                inputs.cols,
+                targets.cols,
+                &args.layers,
+                args.learning_rate,
+                args.epochs,
+                args.sample_rate,
+                &track_config,
+                args.boundary_resolution,
+                checkpoint_rate,
+                inputs.rows,
+            ) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("Error initializing output directory: {}", e);
+                    process::exit(1);
+                }
+            },
+        )
+    } else {
+        None
     };
 
-    let mut pred_writer = match &args.output_predictions {
-        Some(path) => match export::PredictionWriter::new(path, inputs.rows) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("Error creating predictions output file '{}': {}", path, e);
-                process::exit(1);
-            }
-        },
-        None => None,
-    };
+    // Pre-generate boundary grid if tracking
+    let boundary_grid = training_output
+        .as_ref()
+        .filter(|o| o.tracking_boundary())
+        .map(|o| generate_2d_grid(o.boundary_resolution()));
 
-    // Training loop - streaming to files, no in-memory accumulation
+    // Training loop
     eprint!("Training...0%");
+    let mut final_loss = 0.0;
 
     for epoch in 0..args.epochs {
         // Execute training step
-        let (loss, prediction) = network.train_batch(&inputs, &targets, args.learning_rate, &loss_fn);
+        let (loss, prediction) =
+            network.train_batch(&inputs, &targets, args.learning_rate, &loss_fn);
+        final_loss = loss;
 
         // Progress indicator
-        if epoch % (args.epochs / 33.max(1)) == 0 && epoch != 0 {
+        if epoch % (args.epochs / 33).max(1) == 0 && epoch != 0 {
             eprint!(".");
         }
-        if epoch % (args.epochs / 10.max(1)) == 0 && epoch != 0 {
+        if epoch % (args.epochs / 10).max(1) == 0 && epoch != 0 {
             eprint!("{}%", (epoch * 100) / args.epochs);
         }
 
-        // Stream to files at sample rate
-        if epoch % args.sample_rate == 0 || epoch == args.epochs - 1 {
-            if let Some(ref mut writer) = loss_writer {
-                if let Err(e) = writer.write(epoch, loss) {
-                    eprintln!("Error writing loss data: {}", e);
+        // Stream metrics at sample rate
+        if let Some(ref mut output) = training_output {
+            if epoch % args.sample_rate == 0 || epoch == args.epochs - 1 {
+                let preds: Vec<f64> = prediction.data.iter().map(|row| row[0]).collect();
+                if let Err(e) = output.write_epoch(epoch, loss, &preds) {
+                    eprintln!("Error writing metrics: {}", e);
                     process::exit(1);
                 }
+
+                // Boundary snapshot
+                if let Some(ref grid) = boundary_grid {
+                    let boundary_preds = network.predict(grid);
+                    if let Err(e) = output.write_boundary(epoch, grid, &boundary_preds) {
+                        eprintln!("Error writing boundary: {}", e);
+                        process::exit(1);
+                    }
+                }
             }
-            if let Some(ref mut writer) = pred_writer {
-                // Extract first output of each sample's prediction
-                let preds: Vec<f64> = prediction.data.iter().map(|row| row[0]).collect();
-                if let Err(e) = writer.write(epoch, &preds) {
-                    eprintln!("Error writing prediction data: {}", e);
+
+            // Model checkpoint (less frequent)
+            if output.tracking_checkpoint()
+                && epoch % output.checkpoint_rate() == 0
+                && epoch != 0
+            {
+                if let Err(e) = output.write_checkpoint(epoch, &network) {
+                    eprintln!("Error writing checkpoint: {}", e);
                     process::exit(1);
                 }
             }
@@ -186,23 +246,18 @@ fn handle_train(args: cli::TrainArgs) {
 
     eprintln!("100%!");
 
-    // Finish streaming writers
-    if let Some(writer) = loss_writer {
-        if let Err(e) = writer.finish() {
-            eprintln!("Error finalizing loss output: {}", e);
-            process::exit(1);
+    // Finalize output directory
+    if let Some(output) = training_output {
+        match output.finish(final_loss, args.epochs) {
+            Ok(dir) => println!("Training output written to '{}'", dir),
+            Err(e) => {
+                eprintln!("Error finalizing output: {}", e);
+                process::exit(1);
+            }
         }
-        println!("Loss data written to '{}'", args.output_loss.as_ref().unwrap());
-    }
-    if let Some(writer) = pred_writer {
-        if let Err(e) = writer.finish() {
-            eprintln!("Error finalizing predictions output: {}", e);
-            process::exit(1);
-        }
-        println!("Prediction data written to '{}'", args.output_predictions.as_ref().unwrap());
     }
 
-    // After training, test predictions
+    // After training, show final predictions
     println!("\nFinal Predictions:");
     let final_predictions = network.predict(&inputs);
 
@@ -219,8 +274,10 @@ fn handle_train(args: cli::TrainArgs) {
         } else {
             // Compact format for single-output problems
             if target_vec.len() == 1 {
-                println!("Input: {:?} → Target: {:.1}, Prediction: {:.4}",
-                    input, target_vec[0], prediction_vec[0]);
+                println!(
+                    "Input: {:?} → Target: {:.1}, Prediction: {:.4}",
+                    input, target_vec[0], prediction_vec[0]
+                );
             } else {
                 println!("Input: {:?}", input);
                 println!("  Target:     {:?}", target_vec);
@@ -229,24 +286,9 @@ fn handle_train(args: cli::TrainArgs) {
         }
     }
 
-    // Generate decision boundary if requested (only for 2D input networks)
-    if let Some(output_path) = &args.output_boundary {
-        if inputs.cols == 2 {
-            let grid = generate_2d_grid(args.output_boundary_resolution);
-            let boundary_predictions = network.predict(&grid);
-            if let Err(e) = export::export_boundary(output_path, &grid, &boundary_predictions) {
-                eprintln!("Error exporting boundary: {}", e);
-                process::exit(1);
-            }
-            println!("Decision boundary exported to '{}'", output_path);
-        } else {
-            eprintln!("Warning: --output-boundary requires 2D input data, skipping");
-        }
-    }
-
     // Save the trained model
-    println!("\nSaving model to '{}'...", args.save);
-    if let Err(e) = save_model(&network, &args.save, inputs.cols, targets.cols, seed) {
+    println!("\nSaving model to '{}'...", save_path);
+    if let Err(e) = save_model(&network, &save_path, inputs.cols, targets.cols, seed) {
         eprintln!("Error saving model: {}", e);
         process::exit(1);
     }
@@ -318,39 +360,162 @@ fn handle_test(args: cli::TestArgs) {
 }
 
 fn handle_visualisation(args: cli::VisualiseArgs) {
-    if args.verbose {
+    match (&args.model, &args.dir) {
+        (Some(model_path), None) => {
+            // Static mode (existing behaviour)
+            handle_static_visualisation(model_path, args.resolution, args.verbose);
+        }
+        (None, Some(dir_path)) => {
+            // Animated mode
+            handle_animated_visualisation(dir_path, &args);
+        }
+        _ => {
+            eprintln!("Error: Must specify either --model or --dir");
+            process::exit(1);
+        }
+    }
+}
+
+fn handle_static_visualisation(model_path: &str, resolution: usize, verbose: bool) {
+    if verbose {
         println!("Neural Network 2D Visualisation\n");
     }
 
     // Load the trained model
-    if args.verbose {
-        println!("Loading model from '{}'...", args.model);
+    if verbose {
+        println!("Loading model from '{}'...", model_path);
     }
 
-    let mut network = match load_model(&args.model) {
+    let mut network = match load_model(model_path) {
         Ok(n) => n,
         Err(e) => {
-            eprintln!("Error loading model from '{}': {}", args.model, e);
+            eprintln!("Error loading model from '{}': {}", model_path, e);
             process::exit(1);
         }
     };
 
-    if args.verbose {
+    if verbose {
         println!("Model loaded successfully!");
     }
 
     // Generate 2D data to visualise
-    let inputs = generate_2d_grid(args.resolution);
+    let inputs = generate_2d_grid(resolution);
 
-    if args.verbose {
-        println!("Generated {} test samples with {} features\n", inputs.rows, inputs.cols);
+    if verbose {
+        println!(
+            "Generated {} test samples with {} features\n",
+            inputs.rows, inputs.cols
+        );
     }
 
     // Run predictions
     let predictions = network.predict(&inputs);
 
     // Display the decision boundary
-    display_decision_boundary(&predictions, args.resolution, args.verbose);
+    display_decision_boundary(&predictions, resolution, verbose);
+}
+
+fn handle_animated_visualisation(dir: &str, args: &cli::VisualiseArgs) {
+    use std::io::{self, Write};
+    use std::thread;
+    use std::time::Duration;
+
+    // Load metadata
+    let metadata = match export::load_metadata(dir) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error loading metadata from '{}': {}", dir, e);
+            process::exit(1);
+        }
+    };
+
+    if !metadata.tracking.boundary {
+        eprintln!(
+            "Error: No boundary data in '{}' (was not tracked during training)",
+            dir
+        );
+        process::exit(1);
+    }
+
+    // List boundary files
+    let files = match export::list_boundary_files(dir) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Error listing boundary files: {}", e);
+            process::exit(1);
+        }
+    };
+
+    if files.is_empty() {
+        eprintln!("Error: No boundary files found in '{}/boundary'", dir);
+        process::exit(1);
+    }
+
+    // Filter by epoch range if specified
+    let files: Vec<_> = files
+        .into_iter()
+        .filter(|(epoch, _)| {
+            args.start_epoch.map_or(true, |s| *epoch >= s)
+                && args.end_epoch.map_or(true, |e| *epoch <= e)
+        })
+        .collect();
+
+    let resolution = metadata.tracking.boundary_resolution;
+    let total_epochs = metadata.hyperparameters.epochs;
+    let delay = Duration::from_millis(args.delay);
+
+    if args.verbose {
+        println!(
+            "Animating {} boundary snapshots at {}ms delay",
+            files.len(),
+            args.delay
+        );
+        println!("Resolution: {}x{}", resolution, resolution);
+        println!();
+    }
+
+    loop {
+        for (i, (epoch, path)) in files.iter().enumerate() {
+            // Load boundary data
+            let predictions = match export::load_boundary(path) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Error loading {}: {}", path, e);
+                    continue;
+                }
+            };
+
+            // Clear screen and move cursor to top-left
+            print!("\x1b[2J\x1b[H");
+
+            // Header with progress
+            println!(
+                "Epoch: {:>5} / {}  Frame: {:>4} / {}",
+                epoch,
+                total_epochs,
+                i + 1,
+                files.len()
+            );
+            println!(
+                "Seed: {}  LR: {}  Architecture: {}",
+                metadata.seed, metadata.hyperparameters.learning_rate, metadata.architecture.layers
+            );
+            println!();
+
+            // Render boundary
+            display_decision_boundary(&predictions, resolution, false);
+
+            // Flush and sleep
+            io::stdout().flush().unwrap();
+            thread::sleep(delay);
+        }
+
+        if !args.loop_animation {
+            break;
+        }
+    }
+
+    println!("\nAnimation complete.");
 }
 
 fn generate_2d_grid(resolution: usize) -> Matrix {

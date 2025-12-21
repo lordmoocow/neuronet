@@ -21,3 +21,5 @@ target
 #.idea/
 .claude/settings.local.json
 data/baselines
+data/experiments
+data
